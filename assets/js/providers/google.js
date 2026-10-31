@@ -26,7 +26,14 @@ function gPeriods(oh){
 }
 // g = compact place returned by /api/places (see netlify/functions/places.mjs)
 function fromGoogle(g, now){
-  let cat = null; for(const t of [g.primaryType, ...(g.types || [])]){ if(t && GMAP[t]){ cat = GMAP[t]; break; } }
+  const types = g.types || [], pt = g.primaryType || '';
+  // Hotels come back from the gym/restaurant searches because they have a gym or restaurant inside —
+  // treat them as hotels, and keep only the upscale ones (they suit "Luxury hotels").
+  if(['hotel','lodging','resort_hotel','extended_stay_hotel'].includes(pt) || (!GMAP[pt] && types.includes('lodging'))){
+    if((g.rating ?? 0) < 4.5 || (g.price != null && g.price < 3)) return null;
+    g = {...g, primaryType:'resort_hotel'};
+  }
+  let cat = null; for(const t of [g.primaryType, ...types]){ if(t && GMAP[t]){ cat = GMAP[t]; break; } }
   if(!cat || !g.name) return null;
   const n = g.name.toLowerCase();
   if(/beach club/.test(n)) cat = 'beachclub';
