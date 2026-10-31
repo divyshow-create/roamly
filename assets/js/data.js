@@ -3,10 +3,11 @@
 
 // Real results for an area are remembered (fresh for 6 h; older copies are only used if live data fails).
 const areaKey = c => `${c.lat.toFixed(2)},${c.lng.toFixed(2)}`;
-function cacheGet(c){ try{ const all = JSON.parse(localStorage.getItem('roamly.cache') || '{}'); return all[areaKey(c)] || null; }catch(e){ return null; } }
+const DATA_VERSION = 2;   // bump whenever the place format or category mapping changes → old saved places are ignored
+function cacheGet(c){ try{ const all = JSON.parse(localStorage.getItem('roamly.cache') || '{}'), e = all[areaKey(c)]; return e && e.v === DATA_VERSION ? e : null; }catch(e){ return null; } }
 function cachePut(c, entry){
   try{
-    const all = JSON.parse(localStorage.getItem('roamly.cache') || '{}'); all[areaKey(c)] = entry;
+    const all = JSON.parse(localStorage.getItem('roamly.cache') || '{}'); all[areaKey(c)] = {...entry, v:DATA_VERSION};
     const keys = Object.keys(all).sort((a,b) => all[b].t - all[a].t); keys.slice(3).forEach(k => delete all[k]);   // keep last 3 areas
     localStorage.setItem('roamly.cache', JSON.stringify(all));
   }catch(e){ /* storage full or blocked — fine, caching is optional */ }
