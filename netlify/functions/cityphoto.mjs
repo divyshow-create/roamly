@@ -1,11 +1,12 @@
 // Roamly — hero photo of the current city (Netlify Function, v2 syntax)
 // GET /api/cityphoto?q=Dubai&lat=25.2&lng=55.3        → {by, place}   (photographer credit, JSON)
 // GET /api/cityphoto?q=Dubai&lat=25.2&lng=55.3&img=1  → 302 redirect to the image itself
-// Uses Places API (New) Text Search ("<city> skyline", then "<city>") and picks a wide landscape photo.
+// Uses Places API (New) Text Search for the city's most-reviewed tourist attractions (Burj Khalifa, Dubai Fountain…)
+// and takes their main cover photo: wide shots only, never images uploaded by the business itself (those are often adverts).
 // The API key stays on the server (GOOGLE_PLACES_API_KEY). Results are cached by Netlify's CDN for a week.
 const env = name => (globalThis.Netlify?.env?.get?.(name)) ?? process.env[name];
 const json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body), {status, headers:{'Content-Type':'application/json; charset=utf-8', ...extra}});
-const WEEK = {'Cache-Control':'public, max-age=86400', 'Netlify-CDN-Cache-Control':'public, durable, s-maxage=604800'};
+const WEEK = {'Cache-Control':'public, max-age=3600', 'Netlify-CDN-Cache-Control':'public, durable, s-maxage=604800'};
 
 function sameSite(req){
   const ref = req.headers.get('origin') || req.headers.get('referer');
@@ -17,23 +18,29 @@ function sameSite(req){
   }catch(e){ return false; }
 }
 async function search(key, textQuery, lat, lng){
-  const body = {textQuery, maxResultCount:5, languageCode:'en'};
+  const body = {textQuery, includedType:'tourist_attraction', maxResultCount:10, languageCode:'en'};
   if(Number.isFinite(lat) && Number.isFinite(lng)) body.locationBias = {circle:{center:{latitude:lat, longitude:lng}, radius:50000}};
   const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method:'POST',
-    headers:{'Content-Type':'application/json', 'X-Goog-Api-Key':key, 'X-Goog-FieldMask':'places.displayName,places.photos'},
+    headers:{'Content-Type':'application/json', 'X-Goog-Api-Key':key, 'X-Goog-FieldMask':'places.displayName,places.photos,places.userRatingCount'},
     body:JSON.stringify(body)
   });
   const d = await r.json().catch(() => ({}));
   if(!r.ok){ const e = new Error(d.error?.message || 'HTTP ' + r.status); e.status = r.status; throw e; }
   return d.places || [];
 }
-// Prefer big landscape photos (they look best behind "Welcome to …")
+// Best photo = cover photo of the most famous attraction: wide, large, and not posted by the business itself.
 function pick(places){
-  const all = [];
-  for(const p of places) for(const ph of (p.photos || []).slice(0, 6)) all.push({ph, place:p.displayName?.text || null});
-  return all.find(x => x.ph.widthPx >= 1200 && x.ph.widthPx > x.ph.heightPx * 1.25)
-      || all.find(x => x.ph.widthPx > x.ph.heightPx) || all[0] || null;
+  const top = [...places].filter(p => (p.photos || []).length).sort((a,b) => (b.userRatingCount || 0) - (a.userRatingCount || 0)).slice(0, 4);
+  const ok = (ph, name) => ph.widthPx >= 1200 && ph.widthPx >= ph.heightPx * 1.3 &&
+    !(ph.authorAttributions || []).some(a => (a.displayName || '').toLowerCase() === (name || '').toLowerCase());
+  for(const p of top){
+    const name = p.displayName?.text || '';
+    const ph = (p.photos || []).slice(0, 5).find(x => ok(x, name));
+    if(ph) return {ph, place:name};
+  }
+  const p = top[0];
+  return p ? {ph:p.photos[0], place:p.displayName?.text || null} : null;
 }
 
 export default async (req) => {
@@ -47,7 +54,7 @@ export default async (req) => {
 
   let found = null;
   try{
-    for(const query of [q + ' skyline', q]){ found = pick(await search(key, query, lat, lng)); if(found) break; }
+    for(const query of [`top tourist attractions in ${q}`, `${q} landmarks`]){ found = pick(await search(key, query, lat, lng)); if(found) break; }
   }catch(e){ return json({error:'google_error', message:e.message}, 502); }
   if(!found) return json({error:'no_photo'}, 404, {'Cache-Control':'public, max-age=3600'});
 
