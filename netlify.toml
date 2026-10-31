@@ -15,8 +15,8 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(self), camera=(), microphone=()"
 
-# Static assets can be cached; index.html is always revalidated so updates show immediately
+# Always check for a newer version (cheap thanks to ETags), so every deploy shows up immediately
 [[headers]]
   for = "/assets/*"
   [headers.values]
-    Cache-Control = "public, max-age=3600"
+    Cache-Control = "public, max-age=0, must-revalidate"
